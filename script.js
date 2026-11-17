@@ -550,8 +550,22 @@
 
   /* ---------- Punkte ---------- */
   const BASE_POINTS = 100;
+  const MAX_BONUS = 50;   // Tempo-Bonus pro richtige Antwort
   const multiplierFor = (streak) => (streak >= 5 ? 2 : streak >= 3 ? 1.5 : 1);
-  const MAX_POINTS = QUIZ_IDS.reduce((sum, _, i) => sum + BASE_POINTS * multiplierFor(i + 1), 0); // 1700
+  // Volle Bonuspunkte bis «full» Sekunden, danach sinkt der Bonus gleichmässig bis 0 bei «zero» Sekunden
+  const TEMPO = {
+    choice: { full: 10, zero: 40 }, tf: { full: 8, zero: 35 },
+    multi: { full: 15, zero: 50 }, domain: { full: 15, zero: 50 },
+    order: { full: 25, zero: 70 }, match: { full: 25, zero: 70 },
+  };
+  function tempoBonus(type, seconds) {
+    const t = TEMPO[type] || TEMPO.choice;
+    if (!Number.isFinite(seconds) || seconds <= t.full) return MAX_BONUS;
+    if (seconds >= t.zero) return 0;
+    return Math.round(MAX_BONUS * (1 - (seconds - t.full) / (t.zero - t.full)));
+  }
+  const pointsFor = (streak, bonus) => Math.round((BASE_POINTS + bonus) * multiplierFor(streak));
+  const MAX_POINTS = QUIZ_IDS.reduce((sum, _, i) => sum + pointsFor(i + 1, MAX_BONUS), 0); // 2550
 
   /* ---------- Simulierte Tages-Mitspielende ---------- */
   const BOT_NAMES = ['Lena', 'Noah', 'Mia', 'Luca', 'Elin', 'Jonas', 'Sara', 'Leon', 'Alina', 'Nico', 'Emma', 'Gian', 'Lia', 'Matteo', 'Zoe', 'Elias', 'Nora', 'Ben', 'Lara', 'Timo', 'Aylin', 'Samuel', 'Chiara', 'Levin'];
@@ -658,7 +672,7 @@
     return shuffle(BOT_NAMES, rnd).slice(0, BOTS_PER_DAY).map((name, i) => {
       const minute = i < 3 ? 8 + rnd() * 70 : 420 + rnd() * 960;               // drei Frühaufstehende, Rest 07–23 Uhr
       const share = i % 7 === 3 ? 0.8 + rnd() * 0.14 : 0.28 + Math.pow(rnd(), 1.15) * 0.5;
-      const score = Math.round((MAX_POINTS * share) / 50) * 50;                 // Punkte kommen immer in 50er-Schritten
+      const score = Math.round(MAX_POINTS * share);
       return { id: `bot-${i}`, name, score, ts: midnight + Math.floor(minute) * 6e4, bot: true };
     }).filter((b) => b.ts <= Date.now());
   }
@@ -802,7 +816,7 @@
    * ===================================================================== */
   function newSession(id, ctx) {
     const q = QUESTIONS[id];
-    const s = { id, ctx, revealed: false, correct: null, sel: null, order: null, pool: null };
+    const s = { id, ctx, revealed: false, correct: null, sel: null, order: null, pool: null, startedAt: performance.now(), seconds: null };
     if (q.type === 'choice' || q.type === 'multi') {
       const idx = q.options.map((_, i) => i);
       s.order = q.optionOrder === 'fixed' ? idx : shuffle(idx);
@@ -981,6 +995,7 @@
     if (!s || s.revealed) return;
     const q = QUESTIONS[s.id];
     s.correct = evaluate(q, s.sel);
+    s.seconds = (performance.now() - s.startedAt) / 1000;   // Zeit läuft nur bis zur Antwort
     s.revealed = true;
     if (s.correct) sound.correct(); else sound.wrong();
     onAnswered(s);
@@ -1019,13 +1034,16 @@
       if (s.correct) {
         run.streak += 1;
         run.bestStreak = Math.max(run.bestStreak, run.streak);
-        const gained = BASE_POINTS * multiplierFor(run.streak);
+        const bonus = tempoBonus(QUESTIONS[s.id].type, s.seconds);
+        const gained = pointsFor(run.streak, bonus);
         run.correct += 1;
         run.points += gained;
         run.lastGain = gained;
+        run.lastBonus = bonus;
       } else {
         run.streak = 0;
         run.lastGain = 0;
+        run.lastBonus = 0;
       }
     }
 
@@ -1737,7 +1755,7 @@
 
   /* ---------- Etappe 3: Quiz ---------- */
   function startQuiz() {
-    ui.quiz = { ids: shuffle(QUIZ_IDS), idx: 0, correct: 0, points: 0, streak: 0, bestStreak: 0, answered: [], lastGain: 0, finished: false };
+    ui.quiz = { ids: shuffle(QUIZ_IDS), idx: 0, correct: 0, points: 0, streak: 0, bestStreak: 0, answered: [], lastGain: 0, lastBonus: 0, finished: false };
     ui.q = null;
   }
 
@@ -1771,11 +1789,11 @@
             <h1 class="h2" style="margin-top:6px">Das grosse Kapitel-10-Quiz</h1>
             <p class="lead" style="margin-top:12px">${QUIZ_IDS.length} Aufgaben quer durch das ganze Kapitel – Multiple Choice, Richtig/Falsch, URL-Detektiv, Reihenfolge und Zuordnen.</p>
             <div class="grid grid--3" style="margin-top:22px;gap:12px">
-              <div class="stat"><div class="stat__v">${BASE_POINTS}</div><div class="stat__l">Punkte pro richtige Antwort</div></div>
+              <div class="stat"><div class="stat__v">${BASE_POINTS}<span style="font-size:.6em"> + ${MAX_BONUS}</span></div><div class="stat__l">Punkte pro richtige Antwort + Tempo-Bonus</div></div>
               <div class="stat"><div class="stat__v">×1.5</div><div class="stat__l">ab 3 richtigen in Serie</div></div>
               <div class="stat"><div class="stat__v">×2</div><div class="stat__l">ab 5 richtigen in Serie</div></div>
             </div>
-            <p class="small muted" style="margin-top:16px">Kein Zeitdruck. Nach jeder Antwort bekommst du eine Erklärung. Verpasste Aufgaben landen im Fehler-Trainer. ${best ? `Dein Bestwert: <strong>${best.points} Punkte</strong> (${best.correct}/${QUIZ_IDS.length}).` : ''}</p>
+            <p class="small muted" style="margin-top:16px">Kein Zeitlimit – aber wer zügig richtig antwortet, holt bis zu ${MAX_BONUS} Bonuspunkte pro Frage. Die Zeit läuft nur bis zu deiner Antwort, die Erklärung danach liest du in Ruhe. Höchstpunktzahl: ${MAX_POINTS}. Verpasste Aufgaben landen im Fehler-Trainer. ${best ? `Dein Bestwert: <strong>${best.points} Punkte</strong> (${best.correct}/${QUIZ_IDS.length}).` : ''}</p>
             <div class="row" style="margin-top:24px">
               <button type="button" class="btn btn--primary" data-action="quiz-start">Quiz starten ${icon('right')}</button>
               ${profile.lessons.length < LESSONS.length ? '<a class="btn btn--text" href="#/theorie">Zuerst die Theorie anschauen</a>' : ''}
@@ -1831,7 +1849,10 @@
             <div class="meter meter--lg" role="progressbar" aria-valuemin="0" aria-valuemax="${QUIZ_IDS.length}" aria-valuenow="${answeredCount}"><div class="meter__fill" style="width:${(answeredCount / QUIZ_IDS.length) * 100}%"></div></div>
           </div>
           <div class="row row--between" style="margin:16px 0 18px">
-            <span class="streak ${run.streak >= 2 ? 'streak--hot' : ''}">${icon('flame')} Serie ${run.streak}${mult > 1 && !ui.q.revealed ? ` <span class="mult">×${mult}</span>` : ''}</span>
+            <span class="row" style="gap:8px">
+              <span class="streak ${run.streak >= 2 ? 'streak--hot' : ''}">${icon('flame')} Serie ${run.streak}${mult > 1 && !ui.q.revealed ? ` <span class="mult">×${mult}</span>` : ''}</span>
+              ${ui.q.revealed && run.lastGain ? `<span class="tempo ${run.lastBonus >= MAX_BONUS ? 'tempo--max' : ''}" title="Antwortzeit ${Math.round(ui.q.seconds)} s">${icon('spark')} Tempo +${run.lastBonus}</span>` : ''}
+            </span>
             <span class="score-pill" style="position:relative" aria-live="polite">${icon('star')} <span id="score" class="tnum">${run.points}</span> Punkte
               ${ui.q.revealed && run.lastGain ? `<span class="points-pop">+${run.lastGain}</span>` : ''}</span>
           </div>
@@ -1938,7 +1959,7 @@
         <div class="card card--pad card--tint">
           <p class="kicker kicker--forest">Dein Platz heute</p>
           <p class="h2" style="margin-top:6px">#${own.rank} <span class="muted" style="font-size:1rem;font-weight:600">von ${list.length}</span></p>
-          <p class="small muted" style="margin-top:6px">${own.rank === 1 ? 'Du hältst den Tagessieg.' : `Mit ${(list[own.rank - 2].score - own.e.score) + 50} Punkten mehr überholst du ${esc(list[own.rank - 2].name)}.`}</p>
+          <p class="small muted" style="margin-top:6px">${own.rank === 1 ? 'Du hältst den Tagessieg.' : `Mit ${(list[own.rank - 2].score - own.e.score) + 1} ${list[own.rank - 2].score - own.e.score === 0 ? 'Punkt' : 'Punkten'} mehr überholst du ${esc(list[own.rank - 2].name)}.`}</p>
           ${canImprove ? `
             <button type="button" class="btn btn--accent btn--sm" style="margin-top:14px" data-action="board-update" ${posting ? 'disabled' : ''}>
               ${posting ? '<span class="spinner spinner--btn" aria-hidden="true"></span> Wird gespeichert …' : `${icon('trophy')} Neuen Bestwert eintragen (${best.points})`}

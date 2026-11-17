@@ -1,0 +1,39 @@
+# Netlify-Konfiguration für das Kapitel-10-Arbeitsheft
+[build]
+  publish = "."                      # index.html, style.css, script.js liegen im Hauptordner
+  functions = "netlify/functions"    # hier liegt leaderboard.mjs
+  command = "echo 'Kein Build-Schritt nötig'"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Quellcode und Konfiguration nicht als Webseite ausliefern
+[[redirects]]
+  from = "/netlify/*"
+  to = "/404"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/package.json"
+  to = "/404"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/ANLEITUNG-DEPLOY.md"
+  to = "/404"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/netlify.toml"
+  to = "/404"
+  status = 404
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"

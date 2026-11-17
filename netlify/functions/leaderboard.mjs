@@ -15,17 +15,18 @@ import { getStore } from '@netlify/blobs';
 const STORE_NAME = 'kapitel10-leaderboard';
 const TIME_ZONE = 'Europe/Zurich';
 
-// Muss zum Quiz in script.js passen: 10 Fragen, 100 Punkte Basis, Serien-Multiplikator
+// Muss zum Quiz in script.js passen: 10 Fragen, 100 Punkte Basis + bis 50 Tempo-Bonus, Serien-Multiplikator
 const QUESTIONS = 10;
 const BASE_POINTS = 100;
+const MAX_BONUS = 50;
 const multiplierFor = (streak) => (streak >= 5 ? 2 : streak >= 3 ? 1.5 : 1);
-// Höchstmögliche Punkte bei k richtigen Antworten (alle k am Stück richtig)
+// Höchstmögliche Punkte bei k richtigen Antworten (alle k am Stück richtig, immer voller Tempo-Bonus)
 const MAX_FOR_CORRECT = Array.from({ length: QUESTIONS + 1 }, (_, k) => {
   let sum = 0;
-  for (let i = 1; i <= k; i++) sum += BASE_POINTS * multiplierFor(i);
+  for (let i = 1; i <= k; i++) sum += Math.round((BASE_POINTS + MAX_BONUS) * multiplierFor(i));
   return sum;
 });
-const MAX_SCORE = MAX_FOR_CORRECT[QUESTIONS]; // 1700
+const MAX_SCORE = MAX_FOR_CORRECT[QUESTIONS]; // 2550
 
 const NAME_MAX = 20;
 const MAX_BODY_BYTES = 2048;
@@ -91,14 +92,14 @@ function cleanName(raw) {
   return { name };
 }
 
-// Punkte müssen zum Quiz passen: 50er-Schritte, 0–1700 und plausibel zur Trefferquote
+// Punkte müssen zum Quiz passen: 0–2550 und plausibel zur Trefferquote
 function checkScore({ score, maxScore, accuracy }) {
   if (![score, maxScore, accuracy].every(Number.isInteger)) return 'Ungültige Punktzahl.';
   if (maxScore !== MAX_SCORE) return 'Diese Punktzahl gehört nicht zum Kapitel-10-Quiz.';
   if (score < 0 || score > maxScore) return `Die Punkte müssen zwischen 0 und ${maxScore} liegen.`;
   if (accuracy < 0 || accuracy > 100 || accuracy % (100 / QUESTIONS) !== 0) return 'Ungültige Trefferquote.';
   const correct = accuracy / (100 / QUESTIONS);
-  if (score % 50 !== 0 || score < BASE_POINTS * correct || score > MAX_FOR_CORRECT[correct]) {
+  if (score < BASE_POINTS * correct || score > MAX_FOR_CORRECT[correct]) {
     return 'Punkte und Trefferquote passen nicht zusammen.';
   }
   return null;
